@@ -1,0 +1,14 @@
+# Scenario defaults — per-job configs in configs/*.yaml are deep-merged on top.
+
+download:
+  rclone_config: "~/.config/rclone/rclone.conf"
+  remote: "s3-cloud"
+  src_path: null
+  scene: null   # set per job
+  flags:
+    - "--progress"
+    - "--transfers=8"
+
+render: {}
+
+save_pairs: {}

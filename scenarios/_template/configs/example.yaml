@@ -1,0 +1,5 @@
+# Per-job config — only specify what differs from base.yaml.
+# Rename this file (e.g. scene_001.yaml) and set your scene.
+
+download:
+  scene: "your-scene-id-here"

@@ -1,0 +1,34 @@
+# Scenario defaults for 01_spatad_cycle.
+# Per-job configs in configs/*.yaml override "scene" (and anything else).
+
+# Where all output goes: data_dir/<scenario>/<config_id>/{raw,rendered,pairs}
+# Relative to repo root, or absolute. Default: ./data
+# data_dir: "/mnt/storage/videogen_data"
+
+# Shared rclone config file (download + cleanup)
+rclone_config: "~/.config/rclone/rclone.conf"
+remote: "s3-cloud"
+
+download:
+  remote: "s3-cloud"
+  src_path: "avteam-datasets/self-driving/argoverse2/sensor/val"
+  scene: null   # set per job — appended to src_path
+  flags:
+    - "--progress"
+    - "--transfers=8"
+
+render:
+  cycle_recon_dir: "cycle_reconstruction"
+  shift: "-3.0 0.0 0.0"
+  gpu: "0"
+
+save_pairs: {}
+
+cleanup:
+  remote: "s3-av"
+  dest_path: "our-datasets/videogen_data/01_spatad_cycle"
+  upload_checkpoints: true
+  delete_after_upload: true
+  flags:
+    - "--progress"
+    - "--transfers=8"
