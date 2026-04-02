@@ -1,5 +1,6 @@
 # Scenario defaults for 01_spatad_cycle.
 # Per-job configs in configs/*.yaml override "scene" (and anything else).
+# Generate them once:  python scripts/generate_av2_scene_configs.py
 
 # Where all output goes: data_dir/<scenario>/<config_id>/{raw,rendered,pairs}
 # Relative to repo root, or absolute. Default: ./data
@@ -11,8 +12,10 @@ remote: "s3-cloud"
 
 download:
   remote: "s3-cloud"
-  src_path: "avteam-datasets/self-driving/argoverse2/sensor/val"
-  scene: null   # set per job — appended to src_path
+  # Parent path on remote (no trailing split). Rclone source: src_path/<split>/<scene>
+  src_path: "avteam-datasets/self-driving/argoverse2/sensor"
+  split: val    # train | val | test — override per job in configs/*.yaml if needed
+  scene: null   # set per job — UUID folder name under split
   flags:
     - "--progress"
     - "--transfers=8"
@@ -29,6 +32,8 @@ cleanup:
   dest_path: "our-datasets/videogen_data/01_spatad_cycle"
   upload_checkpoints: true
   delete_after_upload: true
+  # Remove this job's configs/<stem>.yaml after upload+local delete (generated AV2 scene YAMLs)
+  delete_job_config: false
   flags:
     - "--progress"
     - "--transfers=8"

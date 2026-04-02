@@ -43,7 +43,7 @@ def _run_pipeline_task(repo_root: str, scenario: str, config_file: str,
         pipeline = PipelineCls(cfg)
         pipeline.run(steps)
         elapsed = time.time() - t0
-        return {"config": config_id, "returncode": 0, "elapsed_s": round(elapsed, 1)}
+        return {"config": cfg.config_id, "returncode": 0, "elapsed_s": round(elapsed, 1)}
     except Exception:
         elapsed = time.time() - t0
         return {

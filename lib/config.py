@@ -44,6 +44,7 @@ class PipelineConfig:
     pairs_dir: Path
     log_dir: Path
     params: dict = field(default_factory=dict)
+    job_config_path: Path | None = None  # set when load() was given a job YAML path
 
     @classmethod
     def load(cls, scenario: str, config_file: str | Path | None = None) -> PipelineConfig:
@@ -60,12 +61,14 @@ class PipelineConfig:
 
         # Layer 2: per-job override
         config_id = "default"
+        job_config_path: Path | None = None
         if config_file is not None:
             config_path = Path(config_file)
             if not config_path.is_absolute():
                 config_path = REPO_ROOT / config_path
             if not config_path.exists():
                 raise FileNotFoundError(f"Config file not found: {config_path}")
+            job_config_path = config_path.resolve()
             override = yaml.safe_load(config_path.read_text()) or {}
             params = deep_merge(params, override)
             config_id = config_path.stem
@@ -101,6 +104,7 @@ class PipelineConfig:
             pairs_dir=pairs_dir,
             log_dir=log_dir,
             params=params,
+            job_config_path=job_config_path,
         )
 
     def get(self, *keys: str, default: Any = None) -> Any:

@@ -64,8 +64,10 @@ class Pipeline(BasePipeline):
         src_path = self.param("download", "src_path")
         scene = self._scene
         flags = self.param("download", "flags", default=[])
+        split = self.param("download", "split", default=None)
+        base = src_path.rstrip("/")
 
-        full_path = f"{src_path}/{scene}"
+        full_path = f"{base}/{split}/{scene}"
         self.log.info(f"Scene  : {scene}")
         self.log.info(f"Source : {remote}:{full_path}")
         self.log.info(f"Dest   : {self.config.raw_dir}")
@@ -122,6 +124,8 @@ class Pipeline(BasePipeline):
         upload_ckpts = self.param("cleanup", "upload_checkpoints", default=True)
         delete_local = self.param("cleanup", "delete_after_upload", default=True)
 
+        delete_job_cfg = self.param("cleanup", "delete_job_config", default=False)
+
         if not remote or not dest_path:
             self.log.warning(
                 "cleanup: cleanup.remote (or top-level remote) / dest_path not configured, skipping upload"
@@ -167,7 +171,22 @@ class Pipeline(BasePipeline):
                 self.log.info(f"  rm -rf {logs_root}")
                 shutil.rmtree(logs_root, ignore_errors=True)
 
+        self._delete_job_config_yaml(delete_job_cfg)
         self.log.info("cleanup complete")
+
+    def _delete_job_config_yaml(self, enabled: bool) -> None:
+        if not enabled or not self.config.job_config_path:
+            return
+        p = self.config.job_config_path
+        cfg_root = self.config.repo_root / "scenarios" / self.config.scenario / "configs"
+        try:
+            p.resolve().relative_to(cfg_root.resolve())
+        except ValueError:
+            self.log.warning(f"cleanup: not deleting config outside scenario configs/: {p}")
+            return
+        if p.is_file():
+            self.log.info(f"Removing job config {p}")
+            p.unlink(missing_ok=True)
 
     # ── internal helpers ─────────────────────────────────────────────────────
 

@@ -4,3 +4,4 @@ __pycache__/
 .env
 *.egg-info/
 rclone.conf
+scenarios/01_spatad_cycle/configs/

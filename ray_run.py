@@ -4,6 +4,7 @@ Distributed pipeline runner — 1 Ray job per YAML config file.
 
 Usage:
     python ray_run.py 01_spatad_cycle                         # all configs, local Ray
+    python scripts/generate_av2_scene_configs.py              # once: fill configs/ from rclone
     python ray_run.py 01_spatad_cycle --ray-address auto      # existing cluster
     python ray_run.py 01_spatad_cycle --max-parallel 0        # no driver-side cap (default is 8)
     python ray_run.py 01_spatad_cycle --num-gpus 0            # CPU-only (no GPU reservation)
