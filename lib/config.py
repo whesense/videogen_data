@@ -129,3 +129,24 @@ def discover_configs(scenario: str, configs_dir: str | Path | None = None) -> li
     configs = sorted(d.glob("*.yaml"))
     configs = [c for c in configs if c.name != "example.yaml"]
     return configs
+
+
+def configs_for_part(configs: list[Path], part_id: int, num_parts: int) -> list[Path]:
+    """Return the disjoint slice for ``part_id`` (1-based) when splitting into ``num_parts`` contiguous runs.
+
+    Sorted ``configs`` order is preserved; part 1 is the first chunk, part ``num_parts`` the last.
+    Sizes differ by at most one when the count is not divisible by ``num_parts``.
+    """
+    if num_parts < 1:
+        raise ValueError("num_parts must be >= 1")
+    if not (1 <= part_id <= num_parts):
+        raise ValueError(f"part_id must be in [1, {num_parts}], got {part_id}")
+    n = len(configs)
+    if n == 0:
+        return []
+    base, rem = divmod(n, num_parts)
+    start = 0
+    for k in range(part_id - 1):
+        start += base + (1 if k < rem else 0)
+    length = base + (1 if (part_id - 1) < rem else 0)
+    return configs[start : start + length]

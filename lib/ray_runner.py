@@ -9,6 +9,7 @@ Usage:
     python ray_run.py 01_spatad_cycle --ray-address auto
     python ray_run.py 01_spatad_cycle --max-parallel 0   # unlimited driver cap (default: 8)
     python ray_run.py 01_spatad_cycle --steps render save_pairs
+    python ray_run.py 02_neurad_cycle --num-parts 4 --part-id 1   # disjoint chunk 1 of 4 (sorted configs)
     python ray_run.py 01_spatad_cycle --dry-run
 """
 from __future__ import annotations
@@ -58,7 +59,8 @@ def run_distributed(scenario: str, configs: list[Path],
                     ray_address: str | None = None,
                     max_parallel: int = 8,
                     steps: list[str] | None = None,
-                    num_gpus: float = 1.0) -> list[dict]:
+                    num_gpus: float = 1.0,
+                    ray_run_part: str | None = None) -> list[dict]:
     """Submit all configs as Ray tasks and collect results.
 
     ``max_parallel`` defaults to 8 (cluster-wide in-flight cap). Use 0 to submit
@@ -75,6 +77,8 @@ def run_distributed(scenario: str, configs: list[Path],
     import ray
 
     env_vars = {k: os.environ[k] for k in ("NEURAD_NUM_ITER", "SPLATAD_NUM_ITER") if k in os.environ}
+    if ray_run_part:
+        env_vars["RAY_RUN_PART"] = ray_run_part
     remote_kw: dict = {"num_gpus": num_gpus}
     if env_vars:
         remote_kw["runtime_env"] = {"env_vars": env_vars}
@@ -92,7 +96,8 @@ def run_distributed(scenario: str, configs: list[Path],
             pass
     if dashboard_url:
         print(f"Ray dashboard: {dashboard_url}")
-    print(f"Submitting {len(configs)} jobs...\n")
+    part_note = f" (part {ray_run_part})" if ray_run_part else ""
+    print(f"Submitting {len(configs)} jobs{part_note}...\n")
 
     repo = str(REPO_ROOT)
 
