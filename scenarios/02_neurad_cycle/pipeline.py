@@ -1,17 +1,19 @@
 """
-Pipeline for scenario 01_spatad_cycle.
+Pipeline for scenario 02_neurad_cycle.
 
 GT data: Argoverse2 driving dataset scenes (downloaded via rclone)
-Cycle output: reverse-shifted views after SPATAD cycle.
+Cycle output: reverse-shifted views after NeuRAD cycle.
 
 Invariant: download -> render -> save_pairs -> cleanup
-  render      – trains original + cycle SplatAD, renders shifted & reverse-shifted
+  render      – trains original + cycle NeuRAD, renders shifted & reverse-shifted
+                (``run_cycle_av2_neurad.sh`` → ``render_shifted_neurad_av2.py``)
   save_pairs  – validates pairs/{gt,corrupted} + comparison video
                 (gt = first-shift ``gt-rgb`` renders, not raw camera JPEGs)
   cleanup     – uploads pairs & checkpoints to S3, deletes local intermediates
 """
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -44,14 +46,18 @@ class Pipeline(BasePipeline):
         return self.param("cleanup", "remote", default=None) or self.param("remote", default=None)
 
     def _env(self) -> dict[str, str]:
-        """Environment variables passed to run_cycle_av2_splatad.sh."""
+        """Environment variables passed to run_cycle_av2_neurad.sh."""
+        # Allow fast test: e.g. run_jobs/run_neurad.sh exports NEURAD_NUM_ITER=1000 (overrides YAML).
+        neurad_iter = os.environ.get("NEURAD_NUM_ITER")
+        if neurad_iter is None:
+            neurad_iter = str(self.param("render", "neurad_num_iter", default=20001))
         return {
             "SEQ": self._scene,
             "CONFIG_ID": self.config.config_id,
             "REPO_DATA": str(self.config.data_root.parent),
             "SHIFT": self.param("render", "shift", default="-3.0 0.0 0.0"),
             "GPU": str(self.param("render", "gpu", default="0")),
-            "SPLATAD_NUM_ITER": str(self.param("render", "splatad_num_iter", default=30001)),
+            "NEURAD_NUM_ITER": neurad_iter,
         }
 
     # ── steps ────────────────────────────────────────────────────────────────
@@ -75,9 +81,9 @@ class Pipeline(BasePipeline):
         self.rclone_copy(remote, full_path, self.config.raw_dir, flags)
 
     def render(self) -> None:
-        """Run full SPATAD cycle reconstruction (Steps 1-5 of the shell script).
+        """Run full NeuRAD cycle reconstruction (Steps 1–5 of the shell script).
 
-        Trains original SplatAD, renders shifted scene, trains cycle model,
+        Trains original NeuRAD, renders shifted scene, trains cycle model,
         renders reverse-shifted scene.  All nerfstudio outputs land under
         data_root/logs/nerfstudio/ (isolated per config_id for Ray safety).
         """
@@ -86,7 +92,7 @@ class Pipeline(BasePipeline):
         self.log.info(f"Scene     : {self._scene}")
 
         self.sh(
-            "bash run_cycle_av2_splatad.sh",
+            "bash run_cycle_av2_neurad.sh",
             cwd=cycle_dir,
             env_extra=self._env(),
         )
@@ -96,7 +102,7 @@ class Pipeline(BasePipeline):
 
         ``gt`` is taken from the shifted scene tree: prefer
         ``shifted/.../sensors/cameras/<cam>/<timestamp>_gt-rgb.jpg``, else ``shifted/.../gt-rgb/<cam>/<timestamp>.jpg``.
-        ``corrupted`` matches ``reverse_shifted/.../sensors/cameras/`` RGB. Steps 6–7 in run_cycle_av2_splatad.sh.
+        ``corrupted`` matches ``reverse_shifted/.../sensors/cameras/`` RGB. Steps 6–7 in run_cycle_av2_neurad.sh.
         """
         pairs = self.config.pairs_dir
         expected = ("gt", "corrupted")

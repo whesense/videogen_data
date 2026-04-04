@@ -66,10 +66,19 @@ def run_distributed(scenario: str, configs: list[Path],
 
     With num_gpus=1, Ray schedules at most one task per GPU cluster-wide (each
     worker gets CUDA_VISIBLE_DEVICES set to a single device).
+
+    Forwards ``NEURAD_NUM_ITER`` / ``SPLATAD_NUM_ITER`` from the driver environment
+    to workers so job scripts (e.g. ``run_jobs/run_neurad.sh``) can set short runs.
     """
+    import os
+
     import ray
 
-    run_task = ray.remote(num_gpus=num_gpus)(_run_pipeline_task)
+    env_vars = {k: os.environ[k] for k in ("NEURAD_NUM_ITER", "SPLATAD_NUM_ITER") if k in os.environ}
+    remote_kw: dict = {"num_gpus": num_gpus}
+    if env_vars:
+        remote_kw["runtime_env"] = {"env_vars": env_vars}
+    run_task = ray.remote(**remote_kw)(_run_pipeline_task)
 
     ctx = ray.init(address=ray_address) if ray_address else ray.init()
     print(f"Ray cluster: {ray.cluster_resources()}")
