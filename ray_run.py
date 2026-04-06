@@ -5,15 +5,24 @@ Distributed pipeline runner — 1 Ray job per YAML config file.
 Usage:
     python ray_run.py 01_spatad_cycle                         # all configs, local Ray
     python scripts/generate_av2_scene_configs.py              # once: fill configs/ from rclone
-    python ray_run.py 01_spatad_cycle --ray-address auto      # existing cluster
+    python ray_run.py 01_spatad_cycle --ray-address auto      # existing cluster (uses RAY_ADDRESS)
     python ray_run.py 01_spatad_cycle --max-parallel 0        # no driver-side cap (default is 8)
     python ray_run.py 01_spatad_cycle --num-gpus 0            # CPU-only (no GPU reservation)
     python ray_run.py 01_spatad_cycle --steps render save_pairs
     python ray_run.py 01_spatad_cycle --dry-run               # preview jobs
     python ray_run.py 02_neurad_cycle --num-parts 4 --part-id 1   # 1/4 of configs (sorted, disjoint chunks)
-    # While jobs run, open the printed "Ray dashboard:" URL (often http://127.0.0.1:8265).
+
+Multi-node (2 machines): start Ray on each host, then run the driver on one host with RAY_ADDRESS set.
+
+    # Node A (head):   ./ray_cluster.sh head
+    # Node B (worker): RAY_HEAD_ADDRESS=<head_ip>:6379 ./ray_cluster.sh worker
+    # Driver (often on head): export RAY_ADDRESS=<head_ip>:6379
+    #                         ./ray_run.sh 01_spatad_cycle --ray-address auto --max-parallel 0
+
+    # While jobs run, open the printed "Ray dashboard:" URL (often http://<head_ip>:8265).
 """
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -23,11 +32,28 @@ sys.path.insert(0, str(ROOT))
 from lib.config import configs_for_part, discover_configs, SCENARIOS_DIR
 
 
+def resolve_ray_address(cli: str | None) -> str | None:
+    """Address for ``ray.init(address=...)``. None means a fresh local single-process cluster.
+
+    Precedence: ``--ray-address`` > ``$RAY_ADDRESS`` (as ``auto``, so Ray reads the env) > local.
+    """
+    if cli is not None:
+        return cli
+    if os.environ.get("RAY_ADDRESS"):
+        return "auto"
+    return None
+
+
 def main():
     parser = argparse.ArgumentParser(description="Run scenario pipelines on a Ray cluster")
     parser.add_argument("scenario", help="Scenario name (e.g. 01_spatad_cycle)")
     parser.add_argument("--configs-dir", default=None, help="Custom configs directory")
-    parser.add_argument("--ray-address", default=None, help="Ray cluster address")
+    parser.add_argument(
+        "--ray-address",
+        default=None,
+        help="Ray cluster: explicit host:port, or 'auto' (uses RAY_ADDRESS). "
+        "If omitted and RAY_ADDRESS is set, 'auto' is implied.",
+    )
     parser.add_argument(
         "--max-parallel",
         type=int,
@@ -110,7 +136,7 @@ def main():
     results = run_distributed(
         scenario=args.scenario,
         configs=configs,
-        ray_address=args.ray_address,
+        ray_address=resolve_ray_address(args.ray_address),
         max_parallel=args.max_parallel,
         steps=args.steps,
         num_gpus=args.num_gpus,

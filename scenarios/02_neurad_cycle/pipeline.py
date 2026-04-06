@@ -9,7 +9,8 @@ Invariant: download -> render -> save_pairs -> cleanup
                 (``run_cycle_av2_neurad.sh`` → ``render_shifted_neurad_av2.py``)
   save_pairs  – validates pairs/{gt,corrupted} + comparison video
                 (gt = first-shift ``gt-rgb`` renders, not raw camera JPEGs)
-  cleanup     – uploads pairs & checkpoints to S3, deletes local intermediates
+  cleanup     – uploads to S3 then deletes local data; ``run()`` runs cleanup in ``finally``
+                after primary steps (success or failure); local delete also if upload fails
 """
 from __future__ import annotations
 
@@ -118,11 +119,10 @@ class Pipeline(BasePipeline):
         self.log.info(f"  comparison videos: {len(videos)}")
 
     def cleanup(self) -> None:
-        """Upload results to S3 and delete local copies of uploaded data.
+        """Upload results to S3 and delete local intermediates.
 
-        Uploads: pairs/, comparison videos, checkpoints (optional).
-        After upload, removes raw/, shifted/, reverse_shifted/, rendered/, pairs/,
-        and logs/ (nerfstudio). Keeps ``comparison_*.mp4`` in the scene root only.
+        Upload failures do not block local deletion (when ``delete_after_upload`` is true).
+        Job config YAML is removed only if the full upload phase completed without error.
         """
         remote = self._cleanup_remote()
         dest_path = self.param("cleanup", "dest_path")
@@ -132,53 +132,58 @@ class Pipeline(BasePipeline):
 
         delete_job_cfg = self.param("cleanup", "delete_job_config", default=False)
 
-        if not remote or not dest_path:
-            self.log.warning(
-                "cleanup: cleanup.remote (or top-level remote) / dest_path not configured, skipping upload"
-            )
-            return
+        upload_ok = False
+        try:
+            if not remote or not dest_path:
+                self.log.warning(
+                    "cleanup: cleanup.remote / dest_path not configured; skipping upload"
+                )
+            else:
+                config_id = self.config.config_id
+                remote_base = f"{remote}:{dest_path}/{config_id}"
 
-        config_id = self.config.config_id
-        remote_base = f"{remote}:{dest_path}/{config_id}"
+                pairs_dir = self.config.pairs_dir
+                if pairs_dir.is_dir() and any(pairs_dir.iterdir()):
+                    self.log.info(f"Uploading pairs -> {remote_base}/pairs/")
+                    self._rclone_sync(remote, f"{dest_path}/{config_id}/pairs", pairs_dir, flags)
 
-        # 1) Upload pairs
-        pairs_dir = self.config.pairs_dir
-        if pairs_dir.is_dir() and any(pairs_dir.iterdir()):
-            self.log.info(f"Uploading pairs -> {remote_base}/pairs/")
-            self._rclone_sync(remote, f"{dest_path}/{config_id}/pairs", pairs_dir, flags)
+                videos = list(self.config.data_root.glob("comparison_*.mp4"))
+                if videos:
+                    vid_staging = self.config.data_root / "_videos"
+                    vid_staging.mkdir(exist_ok=True)
+                    for v in videos:
+                        shutil.copy2(v, vid_staging / v.name)
+                    self.log.info(f"Uploading {len(videos)} videos -> {remote_base}/videos/")
+                    self._rclone_sync(remote, f"{dest_path}/{config_id}/videos", vid_staging, flags)
+                    shutil.rmtree(vid_staging, ignore_errors=True)
 
-        # 2) Upload comparison videos
-        videos = list(self.config.data_root.glob("comparison_*.mp4"))
-        if videos:
-            vid_staging = self.config.data_root / "_videos"
-            vid_staging.mkdir(exist_ok=True)
-            for v in videos:
-                shutil.copy2(v, vid_staging / v.name)
-            self.log.info(f"Uploading {len(videos)} videos -> {remote_base}/videos/")
-            self._rclone_sync(remote, f"{dest_path}/{config_id}/videos", vid_staging, flags)
-            shutil.rmtree(vid_staging, ignore_errors=True)
+                ns_dir = self.config.data_root / "logs" / "nerfstudio"
+                if upload_ckpts and ns_dir.is_dir():
+                    self.log.info(f"Uploading checkpoints -> {remote_base}/checkpoints/")
+                    self._rclone_sync(remote, f"{dest_path}/{config_id}/checkpoints", ns_dir, flags)
 
-        # 3) Upload checkpoints (nerfstudio logs)
-        ns_dir = self.config.data_root / "logs" / "nerfstudio"
-        if upload_ckpts and ns_dir.is_dir():
-            self.log.info(f"Uploading checkpoints -> {remote_base}/checkpoints/")
-            self._rclone_sync(remote, f"{dest_path}/{config_id}/checkpoints", ns_dir, flags)
-
-        # 4) Delete local copies of what was uploaded; keep comparison videos on disk
-        if delete_local:
-            self.log.info("Deleting local data (keeping comparison_*.mp4 in scene root) ...")
-            for name in ("raw", "shifted", "reverse_shifted", "rendered", "pairs"):
-                d = self.config.data_root / name
-                if d.is_dir():
-                    self.log.info(f"  rm -rf {d}")
-                    shutil.rmtree(d, ignore_errors=True)
-            logs_root = self.config.data_root / "logs"
-            if logs_root.is_dir():
-                self.log.info(f"  rm -rf {logs_root}")
-                shutil.rmtree(logs_root, ignore_errors=True)
-
-        self._delete_job_config_yaml(delete_job_cfg)
+                upload_ok = True
+        except Exception:
+            self.log.exception("cleanup: S3 upload phase failed")
+        finally:
+            if delete_local:
+                self._cleanup_local_intermediates()
+            if upload_ok:
+                self._delete_job_config_yaml(delete_job_cfg)
         self.log.info("cleanup complete")
+
+    def _cleanup_local_intermediates(self) -> None:
+        """Remove raw/shifted/reverse_shifted/rendered/pairs and nerfstudio logs under data_root."""
+        self.log.info("Deleting local data (keeping comparison_*.mp4 in scene root) ...")
+        for name in ("raw", "shifted", "reverse_shifted", "rendered", "pairs"):
+            d = self.config.data_root / name
+            if d.is_dir():
+                self.log.info(f"  rm -rf {d}")
+                shutil.rmtree(d, ignore_errors=True)
+        logs_root = self.config.data_root / "logs"
+        if logs_root.is_dir():
+            self.log.info(f"  rm -rf {logs_root}")
+            shutil.rmtree(logs_root, ignore_errors=True)
 
     def _delete_job_config_yaml(self, enabled: bool) -> None:
         if not enabled or not self.config.job_config_path:

@@ -6,11 +6,14 @@ Each task instantiates the scenario's Pipeline class and calls pipeline.run().
 
 Usage:
     python ray_run.py 01_spatad_cycle
-    python ray_run.py 01_spatad_cycle --ray-address auto
+    python ray_run.py 01_spatad_cycle --ray-address auto   # cluster; set RAY_ADDRESS=host:6379 on driver
     python ray_run.py 01_spatad_cycle --max-parallel 0   # unlimited driver cap (default: 8)
     python ray_run.py 01_spatad_cycle --steps render save_pairs
     python ray_run.py 02_neurad_cycle --num-parts 4 --part-id 1   # disjoint chunk 1 of 4 (sorted configs)
     python ray_run.py 01_spatad_cycle --dry-run
+
+Multi-node: start head/worker via ./ray_cluster.sh, export RAY_ADDRESS=<head_ip>:6379, then run with
+--ray-address auto (or omit --ray-address if RAY_ADDRESS is already exported).
 """
 from __future__ import annotations
 
@@ -84,7 +87,10 @@ def run_distributed(scenario: str, configs: list[Path],
         remote_kw["runtime_env"] = {"env_vars": env_vars}
     run_task = ray.remote(**remote_kw)(_run_pipeline_task)
 
-    ctx = ray.init(address=ray_address) if ray_address else ray.init()
+    if ray_address:
+        ctx = ray.init(address=ray_address)
+    else:
+        ctx = ray.init()
     print(f"Ray cluster: {ray.cluster_resources()}")
     dashboard_url = None
     if ctx is not None:

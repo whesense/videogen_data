@@ -4,6 +4,8 @@ Abstract base class for all datagen scenario pipelines.
 Each scenario implements a subclass and overrides download / render / save_pairs.
 The base class provides logging, config access, and the step runner.
 
+Steps (see ``STEPS``): ``download``, ``render``, ``save_pairs``, ``cleanup``.
+
 Typical scenario pipeline.py:
 
     from lib.base_pipeline import BasePipeline
@@ -85,14 +87,39 @@ class BasePipeline(ABC):
     # ── Runner ──────────────────────────────────────────────────────────────
 
     def run(self, steps: list[str] | None = None) -> None:
-        """Execute pipeline steps in order."""
+        """Execute pipeline steps in order.
+
+        If ``cleanup`` is among the requested steps, it runs in a ``finally`` block
+        after the other steps so local disk cleanup still runs when download/render
+        fails or when upload fails.
+        """
         steps = steps or list(STEPS)
-        for step_name in steps:
-            if step_name not in STEPS:
-                raise ValueError(f"Unknown step '{step_name}'. Valid: {STEPS}")
-            self.log.info(f"{'=' * 10} {step_name} {'=' * 10}")
-            method = getattr(self, step_name)
-            method()
+        cleanup_requested = "cleanup" in steps
+        primary = [s for s in steps if s != "cleanup"]
+
+        err: BaseException | None = None
+        cleanup_err: BaseException | None = None
+        try:
+            for step_name in primary:
+                if step_name not in STEPS:
+                    raise ValueError(f"Unknown step '{step_name}'. Valid: {STEPS}")
+                self.log.info(f"{'=' * 10} {step_name} {'=' * 10}")
+                getattr(self, step_name)()
+        except BaseException as e:
+            err = e
+        finally:
+            if cleanup_requested:
+                self.log.info(f"{'=' * 10} cleanup {'=' * 10}")
+                try:
+                    self.cleanup()
+                except BaseException as e:
+                    cleanup_err = e
+                    self.log.exception("cleanup step failed")
+
+        if err is not None:
+            raise err
+        if cleanup_err is not None:
+            raise cleanup_err
         self.log.info("Pipeline complete.")
 
     # ── Helpers available to all scenarios ───────────────────────────────────

@@ -1,4 +1,5 @@
 data/
+.ray_local/
 __pycache__/
 *.pyc
 .env
