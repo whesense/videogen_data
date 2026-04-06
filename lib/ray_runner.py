@@ -74,17 +74,23 @@ def run_distributed(scenario: str, configs: list[Path],
 
     Forwards ``NEURAD_NUM_ITER`` / ``SPLATAD_NUM_ITER`` from the driver environment
     to workers so job scripts (e.g. ``run_jobs/run_neurad.sh``) can set short runs.
+
+    Sets ``PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION`` on workers (default ``python``) so
+    NeuRAD / older generated protos work with protobuf 4–6 without regenerating stubs;
+    slower than C++ parsing. Override on the driver: ``export PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION=cpp``.
     """
     import os
 
     import ray
 
     env_vars = {k: os.environ[k] for k in ("NEURAD_NUM_ITER", "SPLATAD_NUM_ITER") if k in os.environ}
+    env_vars["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = os.environ.get(
+        "PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python"
+    )
     if ray_run_part:
         env_vars["RAY_RUN_PART"] = ray_run_part
     remote_kw: dict = {"num_gpus": num_gpus}
-    if env_vars:
-        remote_kw["runtime_env"] = {"env_vars": env_vars}
+    remote_kw["runtime_env"] = {"env_vars": env_vars}
     run_task = ray.remote(**remote_kw)(_run_pipeline_task)
 
     if ray_address:

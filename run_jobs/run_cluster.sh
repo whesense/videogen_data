@@ -1,7 +1,4 @@
 #!/usr/bin/env bash
-
-set -euo pipefail
-
 source /workspace/chuser shirokov
 conda activate  /home/jovyan/.mlspace/envs/neurad
 

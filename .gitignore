@@ -1,10 +1,10 @@
 data/
 .ray_local/
+.r/
 __pycache__/
 *.pyc
 .env
 *.egg-info/
 rclone.conf
-# Per-job generated YAMLs (large)
 scenarios/01_spatad_cycle/configs/
 scenarios/02_neurad_cycle/configs/

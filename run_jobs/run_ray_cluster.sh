@@ -17,7 +17,7 @@
 #   RAY_WORKER_DELAY=15     — sleep on workers before ray start (head must be up first)
 #   RAY_DRIVER_DELAY=5      — sleep on rank 0 after head, before ray_run (lets workers join)
 #   RUN_RAY_DRIVER=1        — set 0 to only start Ray cluster (no ray_run.sh on rank 0)
-#   RAY_LOCAL_ROOT          — passed implicitly via ray_cluster.sh (local SSD if repo is on NFS)
+#   RAY_TEMP_DIR / RAY_SPILL_DIR / RAY_LOCAL_ROOT — see ray_cluster.sh (temp short; spill on repo disk)
 #
 # Master address resolution:
 #   1) If MASTER_ADDR is already set, use it.
