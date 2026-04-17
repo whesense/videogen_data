@@ -1,0 +1,40 @@
+# Multickpt SplatAD cycle: download raw + optional checkpoints from scenario 01 S3 upload,
+# prune old runs, shifted_traj/ at scene root, pairs/{gt,corrupted_<step>/}, per-checkpoint reverse_shifted_<step>/.
+#
+# Per-job configs: same pattern as 01 (``python scripts/generate_av2_scene_configs.py --scenario 03_spatad_cycle_multickpt``).
+
+rclone_config: "~/.config/rclone/rclone.conf"
+remote: "s3-cloud"
+
+download:
+  remote: "s3-cloud"
+  src_path: "avteam-datasets/self-driving/argoverse2/sensor"
+  split: val
+  scene: null
+  flags:
+    - "--progress"
+    - "--transfers=32"
+  checkpoints_from:
+    remote: "s3-av"
+    dest_path: "our-datasets/videogen_data/01_spatad_cycle"
+    flags: ["--progress", "--transfers=32"]
+
+render:
+  cycle_recon_dir: "cycle_reconstruction"
+  cycle_recon_script: "run_cycle_av2_splatad_multickpt.sh"
+  # Path segment ``shifted/sensor/<split>/<uuid>/`` (must match ``render_shifted_splatad_av2`` / checkpoint YAML).
+  av2_sensor_split: train
+  shift: "-3.0 0.0 0.0"
+  gpu: "0"
+
+save_pairs: {}
+
+cleanup:
+  remote: "s3-av"
+  dest_path: "our-datasets/videogen_data/03_spatad_cycle_multickpt"
+  # Uploads image dirs only: pairs/ (gt/, corrupted_<step>/) and shifted_traj/ (no reverse_shifted_*, checkpoints, logs).
+  delete_after_upload: true
+  delete_job_config: false
+  flags:
+    - "--progress"
+    - "--transfers=32"

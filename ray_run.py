@@ -10,6 +10,7 @@ Usage:
     python ray_run.py 01_spatad_cycle --num-gpus 0            # CPU-only (no GPU reservation)
     python ray_run.py 01_spatad_cycle --steps render save_pairs
     python ray_run.py 01_spatad_cycle --dry-run               # preview jobs
+    python ray_run.py 03_spatad_cycle_multickpt --config scenarios/03_spatad_cycle_multickpt/configs/scene_022af476.yaml
     python ray_run.py 02_neurad_cycle --num-parts 4 --part-id 1   # 1/4 of configs (sorted, disjoint chunks)
 
 Multi-node (2 machines): start Ray on each host, then run the driver on one host with RAY_ADDRESS set.

@@ -8,3 +8,4 @@ __pycache__/
 rclone.conf
 scenarios/01_spatad_cycle/configs/
 scenarios/02_neurad_cycle/configs/
+scenarios/03_spatad_cycle_multickpt/configs/
