@@ -13,6 +13,7 @@ download:
 
 render:
   3dgs_dir: "gaussian-splatting"
+  iters: ["200", "300", "500"]
 
 save_pairs:
   dst_path: "s3://our-datasets/videogen_data/04_3dgs_dl3dv/"

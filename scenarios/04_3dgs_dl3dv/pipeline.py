@@ -97,12 +97,12 @@ class Pipeline(BasePipeline):
                 # random_state=50,
             )
             percent_train = (labels == TRAIN).sum() / len(labels)
-            print(f"iter={i}, min_dist={min_dist}, percent_train={percent_train:.3f}")
+            self.log.info(f"iter={i}, min_dist={min_dist}, percent_train={percent_train:.3f}")
             if percent_train >= min_threshold:
                 break
             min_dist /= 2  # relax constraint
         else:
-            print("Warning: couldn't reach desired train percentage")
+            self.log.info("Warning: couldn't reach desired train percentage")
         self.labels = labels
         # plot_split(points, labels, os.path.join(SAVE_DIR, args.hash, 'split.jpg'))
 
@@ -120,12 +120,12 @@ class Pipeline(BasePipeline):
                 )
             )
 
-        print("Successfully splitted camera poses")  # TODO change  all print to log
+        self.log.info("Successfully splitted camera poses")
 
     def render(self) -> None:
         """Run full 3dgs cycle."""
         self._prepare_scene()
-
+        
         self.sh(
             [
                 "python",
@@ -138,16 +138,13 @@ class Pipeline(BasePipeline):
                 "--llffhold",
                 "0",
                 "--iterations",
-                "500",
+                self.param("render", "iters")[-1],
                 "--save_iterations",
-                "200",
-                "300",
-                "500",
+                *self.param('render', 'iters'),
             ],
             cwd=self._3dgs_dir,
         )
-        print("Successfully optimized scene")
-        # TODO configure iters
+        self.log.info("Successfully optimized scene")
 
         # for rendering keep only test scenes(not none)
         with open(
@@ -164,12 +161,13 @@ class Pipeline(BasePipeline):
                 )
             )
 
-        for iter in ["200", "300", "500"]:
+        for iter in self.param('render', 'iters'):
             self.sh(
                 ["python", "render.py", "-m", os.path.join("output", self._scene),
                 "--iteration", iter, "--skip_train"],
                 cwd=self._3dgs_dir,
             )
+
 
     def save_pairs(self) -> None:
         """Validate pairs/{gt,corrupted} and comparison videos.
@@ -183,10 +181,8 @@ class Pipeline(BasePipeline):
         os.makedirs(f"{root}/logs", exist_ok=True)
         os.makedirs(f"{root}/pairs/gt", exist_ok=True)
 
-        iterations = [200, 300, 500]
-
-        for iter in iterations:
-            iter_str = f"{iter:04d}"
+        for iter in self.param("render", "iters"):
+            iter_str = f"{int(iter):04d}"
             src_ply = f"{root}/point_cloud/iteration_{iter}/point_cloud.ply"
             dst_ply = f"{root}/logs/point_cloud_{iter_str}.ply"
             shutil.copy2(src_ply, dst_ply)
@@ -196,9 +192,9 @@ class Pipeline(BasePipeline):
             shutil.copytree(src_corr, dst_corr, dirs_exist_ok=True)
 
             # --- gt (only copy once) ---
-            if iter == 200:
-                src_gt = f"{root}/test/{iter}/pairs/gt"
-                dst_gt = f"{root}/pairs/gt"
+            src_gt = f"{root}/test/{iter}/pairs/gt"
+            dst_gt = f"{root}/pairs/gt"
+            if not os.path.isdir(dst_gt):
                 shutil.copytree(src_gt, dst_gt, dirs_exist_ok=True)
 
         dst_path = os.path.join(self.param("save_pairs", "dst_path"), self._batch, self._scene)
@@ -223,7 +219,13 @@ class Pipeline(BasePipeline):
         Upload failures do not block local deletion (when ``delete_after_upload`` is true).
         Job config YAML is removed only if the full upload phase completed without error.
         """
-        os.remove(os.path.join(self._save_dir, f"{self._scene}.zip"))
-        shutil.rmtree(os.path.join(self._save_dir, self._scene))
-        shutil.rmtree(os.path.join(self._3dgs_dir, "output", self._scene))
-        print(f'Successfully cleaned artifacts')
+        zip_file = os.path.join(self._save_dir, f"{self._scene}.zip")
+        if os.path.exists(zip_file):
+            os.remove(zip_file)
+        zip_dir = os.path.join(self._save_dir, self._scene)
+        if os.path.isdir(zip_dir):
+            shutil.rmtree(zip_dir)
+        exp_dir = os.path.join(self._3dgs_dir, "output", self._scene)
+        if os.path.isdir(exp_dir):
+            shutil.rmtree(exp_dir)
+        self.log.info(f'Successfully cleaned artifacts')
