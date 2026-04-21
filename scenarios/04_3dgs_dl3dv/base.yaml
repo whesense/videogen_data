@@ -1,0 +1,21 @@
+# Scenario defaults for 04_3dgs_dl3dv.
+# Per-job configs in configs/*.yaml override "scene" (and anything else).
+# Generate them once:  python scripts/generate_dl3dv_scene_configs.py
+
+aws_credentials_file: "/home/jovyan/users/ph13egev/.aws/credentials"
+aws_config_file: "/home/jovyan/users/ph13egev/.aws/config"
+
+download:
+  src_path: "s3://raw-datasets/DL3DV/"
+  batch: null
+  scene: null
+  save_dir: "DL3DVTMP"
+
+render:
+  3dgs_dir: "gaussian-splatting"
+
+save_pairs:
+  dst_path: "s3://our-datasets/videogen_data/04_3dgs_dl3dv/"
+
+cleanup: {}
+  
