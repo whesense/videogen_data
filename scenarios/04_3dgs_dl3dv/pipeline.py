@@ -50,7 +50,6 @@ class Pipeline(BasePipeline):
         """Environment variables passed to .sh."""
         return {
             "PATH": "$HOME/.local/bin:$PATH",
-            "PATH": "/home/jovyan/.mlspace/envs/gaussian_splatting/bin:$PATH", #TODO
             "AWS_SHARED_CREDENTIALS_FILE": self.param("aws_credentials_file"),
             "AWS_CONFIG_FILE": self.param("aws_config_file"),
         }

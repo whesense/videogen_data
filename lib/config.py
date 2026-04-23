@@ -134,7 +134,7 @@ class PipelineConfig:
 def make_config_id_from_scene_params(params: dict) -> str:
     """Deterministic filesystem-safe config id for CSV-sourced jobs."""
     parts = [f"{k}_{params[k]}" for k in sorted(params.keys())]
-    return "_".join(parts) 
+    return "_".join(parts)
 
 def load_base_params(scenario: str) -> dict[str, Any]:
     """Load base.yaml for scenario, validating scenario existence."""
