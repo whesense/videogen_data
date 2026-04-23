@@ -10,6 +10,7 @@ The merged dict is wrapped in PipelineConfig with computed paths.
 from __future__ import annotations
 
 import copy
+import pandas as pd
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -49,19 +50,10 @@ class PipelineConfig:
     @classmethod
     def load(cls, scenario: str, config_file: str | Path | None = None) -> PipelineConfig:
         """Load and merge YAML configs, resolve paths."""
-        scenario_dir = SCENARIOS_DIR / scenario
-        if not scenario_dir.is_dir():
-            raise FileNotFoundError(f"Scenario not found: {scenario_dir}")
-
-        # Layer 1: base.yaml
-        base_yaml = scenario_dir / "base.yaml"
-        params: dict[str, Any] = {}
-        if base_yaml.exists():
-            params = yaml.safe_load(base_yaml.read_text()) or {}
-
-        # Layer 2: per-job override
+        load_base_params(scenario)
         config_id = "default"
         job_config_path: Path | None = None
+        params_override: dict[str, Any] | None = None
         if config_file is not None:
             config_path = Path(config_file)
             if not config_path.is_absolute():
@@ -69,9 +61,28 @@ class PipelineConfig:
             if not config_path.exists():
                 raise FileNotFoundError(f"Config file not found: {config_path}")
             job_config_path = config_path.resolve()
-            override = yaml.safe_load(config_path.read_text()) or {}
-            params = deep_merge(params, override)
+            params_override = yaml.safe_load(config_path.read_text()) or {}
             config_id = config_path.stem
+        return cls.load_from_params(
+            scenario=scenario,
+            params_override=params_override,
+            config_id=config_id,
+            job_config_path=job_config_path,
+        )
+
+    @classmethod
+    def load_from_params(
+        cls,
+        scenario: str,
+        params_override: dict[str, Any] | None = None,
+        *,
+        config_id: str = "default",
+        job_config_path: Path | None = None,
+    ) -> PipelineConfig:
+        """Build config from base.yaml + in-memory override params."""
+        params = load_base_params(scenario)
+        if params_override:
+            params = deep_merge(params, params_override)
 
         # Allow config to explicitly set config_id
         config_id = params.pop("config_id", config_id)
@@ -118,6 +129,49 @@ class PipelineConfig:
             if obj is None:
                 return default
         return obj
+
+
+def make_config_id_from_scene_params(params: dict) -> str:
+    """Deterministic filesystem-safe config id for CSV-sourced jobs."""
+    parts = [f"{k}_{params[k]}" for k in sorted(params.keys())]
+    return "_".join(parts) 
+
+def load_base_params(scenario: str) -> dict[str, Any]:
+    """Load base.yaml for scenario, validating scenario existence."""
+    scenario_dir = SCENARIOS_DIR / scenario
+    if not scenario_dir.is_dir():
+        raise FileNotFoundError(f"Scenario not found: {scenario_dir}")
+    base_yaml = scenario_dir / "base.yaml"
+    if not base_yaml.exists():
+        return {}
+    return yaml.safe_load(base_yaml.read_text()) or {}
+
+def load_scene_rows(
+    scenario: str,
+    scene_csv: str | Path,
+    chunk_id: int,
+) -> list[dict[str, Any]]:
+    """Load CSV rows and produce per-row download overrides for base.yaml null keys."""
+    base = load_base_params(scenario)
+    download = base.get("download") or {}
+    if not isinstance(download, dict):
+        raise ValueError(f"Invalid download section in base.yaml for scenario '{scenario}'")
+    required_download_keys = [k for k, v in download.items() if v is None]
+
+    df = pd.read_csv(scene_csv)
+    df_chunk = df[df["chunk"] == chunk_id]
+    rows_download_override = []
+    for i, row in df_chunk.iterrows():
+        download_override: dict[str, str] = {}
+        for key in required_download_keys:
+            val = row.get(key)
+            if val is None:
+                raise ValueError(
+                    f"CSV row missing required value for download.{key}: {scene_csv}"
+                )
+            download_override[key] = val
+        rows_download_override.append(download_override)
+    return rows_download_override
 
 
 def discover_configs(scenario: str, configs_dir: str | Path | None = None) -> list[Path]:
