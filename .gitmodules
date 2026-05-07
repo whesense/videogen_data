@@ -1,3 +1,6 @@
 [submodule "cycle_reconstruction"]
 	path = cycle_reconstruction
 	url = git@github.com:ArseniiShirokov/cycle_reconstruction.git
+[submodule "gaussian-splatting"]
+	path = gaussian-splatting
+	url = git@github.com:whesense/gaussian-splatting.git
