@@ -23,6 +23,7 @@ Multi-node (2 machines): start Ray on each host, then run the driver on one host
     # While jobs run, open the printed "Ray dashboard:" URL (often http://<head_ip>:8265).
 """
 import argparse
+import csv
 import os
 import sys
 from pathlib import Path
@@ -49,6 +50,16 @@ def main():
     parser = argparse.ArgumentParser(description="Run scenario pipelines on a Ray cluster")
     parser.add_argument("scenario", help="Scenario name (e.g. 01_spatad_cycle)")
     parser.add_argument("--configs-dir", default=None, help="Custom configs directory")
+    parser.add_argument(
+        "--scene-csv",
+        default=None,
+        help="Chunk mode: one Ray job per unique chunk from CSV.",
+    )
+    parser.add_argument(
+        "--chunk-ids",
+        default=None,
+        help="Optional comma-separated chunk ids (e.g. 0,1,2) for --scene-csv mode.",
+    )
     parser.add_argument(
         "--ray-address",
         default=None,
@@ -107,29 +118,92 @@ def main():
         print(f"ERROR: Scenario not found: {scenario_dir}", file=sys.stderr)
         sys.exit(1)
 
-    configs = discover_configs(args.scenario, args.configs_dir)
-    if not configs:
-        print(f"ERROR: No .yaml configs in {scenario_dir / 'configs'}", file=sys.stderr)
+    if args.scene_csv and args.configs_dir:
+        print("ERROR: use only one source mode: --scene-csv OR --configs-dir.", file=sys.stderr)
         sys.exit(1)
 
-    total_before_part = len(configs)
+    def parse_chunk_ids(raw: str | None) -> list[int] | None:
+        if not raw:
+            return None
+        chunks: list[int] = []
+        for part in raw.split(","):
+            part = part.strip()
+            if part:
+                chunks.append(int(part))
+        if not chunks:
+            return None
+        return sorted(set(chunks))
+
+    def discover_chunks(scene_csv_path: Path) -> list[int]:
+        chunks: set[int] = set()
+        with scene_csv_path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            if "chunk" not in (reader.fieldnames or []):
+                raise ValueError(f"'chunk' column is missing in {scene_csv_path}")
+            for row in reader:
+                val = row.get("chunk")
+                if val is None or str(val).strip() == "":
+                    continue
+                chunks.add(int(val))
+        return sorted(chunks)
+
+    scene_csv_path: Path | None = None
+    chunk_ids: list[int] | None = None
+    configs: list[Path] = []
+
+    if args.scene_csv:
+        scene_csv_path = Path(args.scene_csv)
+        if not scene_csv_path.is_absolute():
+            scene_csv_path = ROOT / scene_csv_path
+        if not scene_csv_path.exists():
+            print(f"ERROR: Scene CSV not found: {scene_csv_path}", file=sys.stderr)
+            sys.exit(1)
+        chunk_ids = parse_chunk_ids(args.chunk_ids) or discover_chunks(scene_csv_path)
+        if not chunk_ids:
+            print(f"ERROR: no chunks found in {scene_csv_path}", file=sys.stderr)
+            sys.exit(1)
+        total_before_part = len(chunk_ids)
+    else:
+        configs = discover_configs(args.scenario, args.configs_dir)
+        if not configs:
+            print(f"ERROR: No .yaml configs in {scenario_dir / 'configs'}", file=sys.stderr)
+            sys.exit(1)
+        total_before_part = len(configs)
+
     ray_run_part: str | None = None
     if args.num_parts is not None and args.num_parts > 1:
-        configs = configs_for_part(configs, args.part_id, args.num_parts)
+        if chunk_ids is not None:
+            chunk_paths = [Path(str(c)) for c in chunk_ids]
+            chunk_paths = configs_for_part(chunk_paths, args.part_id, args.num_parts)
+            chunk_ids = [int(p.name) for p in chunk_paths]
+        else:
+            configs = configs_for_part(configs, args.part_id, args.num_parts)
         ray_run_part = f"{args.part_id}/{args.num_parts}"
 
     print(f"Scenario : {args.scenario}")
     if ray_run_part:
-        print(f"Part     : {ray_run_part}  ({len(configs)} of {total_before_part} configs)")
-    print(f"Configs  : {len(configs)} jobs")
+        count = len(chunk_ids) if chunk_ids is not None else len(configs)
+        noun = "chunks" if chunk_ids is not None else "configs"
+        print(f"Part     : {ray_run_part}  ({count} of {total_before_part} {noun})")
+    if chunk_ids is not None:
+        print("Mode     : scene-csv chunks")
+        print(f"Scene CSV: {scene_csv_path}")
+        print(f"Chunks   : {len(chunk_ids)} jobs")
+    else:
+        print(f"Configs  : {len(configs)} jobs")
     if args.steps:
         print(f"Steps    : {' → '.join(args.steps)}")
     print()
 
     if args.dry_run:
-        for c in configs:
-            print(f"  {c.stem}")
-        print(f"\n{len(configs)} configs. Use without --dry-run to submit.")
+        if chunk_ids is not None:
+            for chunk_id in chunk_ids:
+                print(f"  chunk_{chunk_id}")
+            print(f"\n{len(chunk_ids)} chunks. Use without --dry-run to submit.")
+        else:
+            for c in configs:
+                print(f"  {c.stem}")
+            print(f"\n{len(configs)} configs. Use without --dry-run to submit.")
         return
 
     from lib.ray_runner import run_distributed, print_results
@@ -142,6 +216,8 @@ def main():
         steps=args.steps,
         num_gpus=args.num_gpus,
         ray_run_part=ray_run_part,
+        scene_csv=str(scene_csv_path) if scene_csv_path is not None else None,
+        chunk_ids=chunk_ids,
     )
     failed = print_results(results)
     sys.exit(1 if failed else 0)

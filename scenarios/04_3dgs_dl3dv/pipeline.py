@@ -35,6 +35,14 @@ class Pipeline(BasePipeline):
         return self.param("download", "scene")
 
     @property
+    def _aws_profile(self) -> str:
+        return self.param("aws_profile", default="s3-av")
+
+    @property
+    def _aws_endpoint(self) -> str:
+        return self.param("aws_endpoint_url", default="https://s3.cloud.ru")
+
+    @property
     def _3dgs_dir(self) -> str:
         return os.path.join(self.config.repo_root, self.param(
             "render", "3dgs_dir", default="gaussian-splatting"
@@ -48,10 +56,17 @@ class Pipeline(BasePipeline):
 
     def _env(self) -> dict[str, str]:
         """Environment variables passed to .sh."""
+        current_path = os.environ.get("PATH", "")
+        local_bins = [
+            "/home/jovyan/users/shirokov/.local/bin",
+            str(Path.home() / ".local" / "bin"),
+        ]
+        merged_path = ":".join(local_bins + ([current_path] if current_path else []))
         return {
-            "PATH": "$HOME/.local/bin:$PATH",
+            "PATH": merged_path,
             "AWS_SHARED_CREDENTIALS_FILE": self.param("aws_credentials_file"),
             "AWS_CONFIG_FILE": self.param("aws_config_file"),
+            "AWS_PROFILE": self._aws_profile,
         }
 
     def download(self) -> None:
@@ -63,10 +78,12 @@ class Pipeline(BasePipeline):
         self.sh(
             [
                 "aws",
+                "--profile",
+                self._aws_profile,
                 "s3",
                 "cp",
                 "--endpoint-url",
-                "https://s3.cloud.ru",
+                self._aws_endpoint,
                 src_path,
                 self._save_dir,
             ],
@@ -140,6 +157,8 @@ class Pipeline(BasePipeline):
                 self.param("render", "iters")[-1],
                 "--save_iterations",
                 *self.param('render', 'iters'),
+                # Ray workers run headless; disable network GUI to avoid port conflicts.
+                "--disable_viewer",
             ],
             cwd=self._3dgs_dir,
         )
@@ -178,7 +197,8 @@ class Pipeline(BasePipeline):
         root = os.path.join(self._3dgs_dir, "output", self._scene)
         # Create target dirs
         os.makedirs(f"{root}/logs", exist_ok=True)
-        os.makedirs(f"{root}/pairs/gt", exist_ok=True)
+        os.makedirs(f"{root}/pairs", exist_ok=True)
+        gt_copied = False
 
         for iter in self.param("render", "iters"):
             iter_str = f"{int(iter):04d}"
@@ -193,8 +213,9 @@ class Pipeline(BasePipeline):
             # --- gt (only copy once) ---
             src_gt = f"{root}/test/{iter}/pairs/gt"
             dst_gt = f"{root}/pairs/gt"
-            if not os.path.isdir(dst_gt):
+            if not gt_copied and os.path.isdir(src_gt):
                 shutil.copytree(src_gt, dst_gt, dirs_exist_ok=True)
+                gt_copied = True
 
         dst_path = os.path.join(self.param("save_pairs", "dst_path"), self._batch, self._scene)
 
@@ -202,10 +223,12 @@ class Pipeline(BasePipeline):
             self.sh(
                 [
                     "aws",
+                    "--profile",
+                    self._aws_profile,
                     "s3",
                     "cp",
                     "--endpoint-url",
-                    "https://s3.cloud.ru",
+                    self._aws_endpoint,
                     f"{root}/{target}",
                     f"{dst_path}/{target}",
                     "--recursive",

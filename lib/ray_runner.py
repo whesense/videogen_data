@@ -58,12 +58,63 @@ def _run_pipeline_task(repo_root: str, scenario: str, config_file: str,
         }
 
 
+def _run_pipeline_chunk_task(
+    repo_root: str,
+    scenario: str,
+    scene_csv: str,
+    chunk_id: int,
+    steps: list[str] | None = None,
+) -> dict:
+    """Executed on a Ray worker: run one scene CSV chunk."""
+    import os, sys
+
+    root = Path(repo_root)
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+    os.chdir(root)
+
+    from lib.config import PipelineConfig, load_scene_rows, make_config_id_from_scene_params
+    from lib.loader import load_pipeline_class
+
+    t0 = time.time()
+    chunk_name = f"chunk_{chunk_id}"
+    try:
+        rows = load_scene_rows(scenario, scene_csv, int(chunk_id))
+        PipelineCls = load_pipeline_class(scenario)
+        for download_override in rows:
+            config_id = make_config_id_from_scene_params(download_override)
+            cfg = PipelineConfig.load_from_params(
+                scenario,
+                params_override={"download": download_override},
+                config_id=config_id,
+            )
+            pipeline = PipelineCls(cfg)
+            pipeline.run(steps)
+        elapsed = time.time() - t0
+        return {
+            "config": chunk_name,
+            "rows": len(rows),
+            "returncode": 0,
+            "elapsed_s": round(elapsed, 1),
+        }
+    except Exception:
+        elapsed = time.time() - t0
+        return {
+            "config": chunk_name,
+            "returncode": 1,
+            "elapsed_s": round(elapsed, 1),
+            "error": traceback.format_exc(),
+        }
+
+
 def run_distributed(scenario: str, configs: list[Path],
                     ray_address: str | None = None,
                     max_parallel: int = 8,
                     steps: list[str] | None = None,
                     num_gpus: float = 1.0,
-                    ray_run_part: str | None = None) -> list[dict]:
+                    ray_run_part: str | None = None,
+                    scene_csv: str | None = None,
+                    chunk_ids: list[int] | None = None) -> list[dict]:
     """Submit all configs as Ray tasks and collect results.
 
     ``max_parallel`` defaults to 8 (cluster-wide in-flight cap). Use 0 to submit
@@ -92,6 +143,7 @@ def run_distributed(scenario: str, configs: list[Path],
     remote_kw: dict = {"num_gpus": num_gpus}
     remote_kw["runtime_env"] = {"env_vars": env_vars}
     run_task = ray.remote(**remote_kw)(_run_pipeline_task)
+    run_chunk_task = ray.remote(**remote_kw)(_run_pipeline_chunk_task)
 
     if ray_address:
         ctx = ray.init(address=ray_address)
@@ -109,30 +161,45 @@ def run_distributed(scenario: str, configs: list[Path],
     if dashboard_url:
         print(f"Ray dashboard: {dashboard_url}")
     part_note = f" (part {ray_run_part})" if ray_run_part else ""
-    print(f"Submitting {len(configs)} jobs{part_note}...\n")
+    total_jobs = len(chunk_ids) if chunk_ids is not None else len(configs)
+    mode = "chunks" if chunk_ids is not None else "jobs"
+    print(f"Submitting {total_jobs} {mode}{part_note}...\n")
 
     repo = str(REPO_ROOT)
 
     if max_parallel > 0:
         pending, results = [], []
-        it = iter(configs)
-        for cfg in it:
+        items = chunk_ids if chunk_ids is not None else configs
+        it = iter(items)
+        for item in it:
             if len(pending) >= max_parallel:
                 break
-            pending.append(run_task.remote(repo, scenario, str(cfg), steps))
-        for cfg in it:
+            if chunk_ids is not None:
+                pending.append(run_chunk_task.remote(repo, scenario, str(scene_csv), int(item), steps))
+            else:
+                pending.append(run_task.remote(repo, scenario, str(item), steps))
+        for item in it:
             ready, pending = ray.wait(pending, num_returns=1)
             results.extend(ray.get(ready))
-            _progress(len(results), len(configs))
-            pending.append(run_task.remote(repo, scenario, str(cfg), steps))
+            _progress(len(results), total_jobs)
+            if chunk_ids is not None:
+                pending.append(run_chunk_task.remote(repo, scenario, str(scene_csv), int(item), steps))
+            else:
+                pending.append(run_task.remote(repo, scenario, str(item), steps))
         results.extend(ray.get(pending))
     else:
-        futures = [run_task.remote(repo, scenario, str(c), steps) for c in configs]
+        if chunk_ids is not None:
+            futures = [
+                run_chunk_task.remote(repo, scenario, str(scene_csv), int(chunk_id), steps)
+                for chunk_id in chunk_ids
+            ]
+        else:
+            futures = [run_task.remote(repo, scenario, str(c), steps) for c in configs]
         results = []
         while futures:
             ready, futures = ray.wait(futures, num_returns=min(len(futures), 4))
             results.extend(ray.get(ready))
-            _progress(len(results), len(configs))
+            _progress(len(results), total_jobs)
 
     return results
 
